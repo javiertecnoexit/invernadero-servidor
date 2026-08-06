@@ -1,0 +1,8 @@
+# Archivos que NO deben ir al repositorio/contenedor
+.git
+.gitignore
+*.md
+*.sql
+LEEME.md
+README.md
+Dockerfile
