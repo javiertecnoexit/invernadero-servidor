@@ -3,7 +3,7 @@
 # Se usa en EasyPanel para construir el contenedor desde este repo.
 # ============================================================
 
-FROM php:8.2-apache
+FROM docker.1ms.run/library/php:8.2-apache
 
 # Habilita la extensión de MySQL (PDO)
 RUN docker-php-ext-install pdo pdo_mysql && \
