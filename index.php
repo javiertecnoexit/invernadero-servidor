@@ -66,7 +66,10 @@
     <div class="card"><h2>🌡️ Temperaturas</h2><div class="sub">4 sensores</div><div class="chart"><canvas id="graf-temp"></canvas></div></div>
     <div class="card"><h2>💧 Humedades</h2><div class="sub">3 sensores</div><div class="chart"><canvas id="graf-hum"></canvas></div></div>
   </div>
-  <div class="chart-full card"><h2>📉 Tasa de Cambio (°C/h)</h2><div class="sub">Exterior vs Interior — velocidad de variación</div><div class="chart"><canvas id="graf-tasa"></canvas></div></div>
+  <div class="charts-row">
+    <div class="card"><h2>📉 Tasa de Cambio (°C/h)</h2><div class="sub">Velocidad de variación de la temperatura</div><div class="chart"><canvas id="graf-tasa"></canvas></div></div>
+    <div class="card"><h2>🎈 Presión atmosférica</h2><div class="sub">Sensor exterior</div><div class="chart"><canvas id="graf-presion"></canvas></div></div>
+  </div>
   <div class="chart-full card"><h2>📈 Comparación: Últimas 24h vs 24h Anteriores</h2><div class="sub">Línea sólida = actual | Punteada = anterior</div><div class="chart"><canvas id="graf-comparacion"></canvas></div></div>
   <div class="charts-row">
     <div class="card"><h2>🔗 Temperatura: Exterior vs Interior</h2><div class="sub">¿Qué tan bien mantiene calor?</div><div class="chart"><canvas id="graf-rel-temp"></canvas></div></div>
@@ -209,67 +212,65 @@ async function cargarDatos() {
   graficos.hum = crearLinea(ctxH, makeDatasets(data.series, SENSOR_HUM), { unidad: '%', minY: 0 });
 
   // Tasa de cambio
-  if (data.tasas) {
+  // Tasa de cambio (dT/dt por intervalo) como línea en el tiempo
+  const serieExt = data.series['Temp Ext'];
+  const serieAlto = data.series['Temp alto'];
+  const serieBajo = data.series['Temp bajo'];
+  if (serieExt || serieAlto || serieBajo) {
+    function calcTasa(puntos) {
+      const out = [];
+      for (let i = 1; i < puntos.length; i++) {
+        const t1 = new Date(puntos[i-1][0]).getTime();
+        const t2 = new Date(puntos[i][0]).getTime();
+        const dtH = (t2 - t1) / 3600000;
+        if (dtH <= 0 || dtH > 6) continue;
+        const dy = puntos[i][1] - puntos[i-1][1];
+        out.push({ x: puntos[i][0], y: +(dy / dtH).toFixed(2) });
+      }
+      return out;
+    }
+    function promedioSeries(a, b) {
+      const map = {};
+      if (a) a.forEach(p => map[p[0]] = p[1]);
+      if (b) b.forEach(p => { if (map[p[0]] !== undefined) map[p[0]] = (map[p[0]] + p[1]) / 2; else map[p[0]] = p[1]; });
+      return Object.entries(map).sort((x, y) => x[0] < y[0] ? -1 : 1).map(([k, v]) => [k, v]);
+    }
+    const intSerie = promedioSeries(serieAlto, serieBajo);
+
     const ctxTasa = document.getElementById('graf-tasa').getContext('2d');
     const tasaDatasets = [];
-    if (data.tasas['Temp Ext'] !== undefined) {
+    if (serieExt) {
       tasaDatasets.push({
         label: 'T ext',
-        data: [{ x: 0, y: data.tasas['Temp Ext'] }],
+        data: calcTasa(serieExt),
         borderColor: COLORES['Temp Ext'],
-        backgroundColor: COLORES['Temp Ext'] + '40',
-        borderWidth: 3,
-        pointRadius: 8,
-        showLine: false,
+        borderWidth: 2,
+        pointRadius: 1,
+        tension: 0.25,
+        spanGaps: true,
       });
     }
-    const intAvg = (data.tasas['Temp alto'] !== undefined && data.tasas['Temp bajo'] !== undefined)
-      ? (data.tasas['Temp alto'] + data.tasas['Temp bajo']) / 2
-      : (data.tasas['Temp alto'] ?? data.tasas['Temp bajo'] ?? null);
-    if (intAvg !== null) {
+    if (intSerie.length > 1) {
       tasaDatasets.push({
         label: 'T interior (prom)',
-        data: [{ x: 1, y: intAvg }],
+        data: calcTasa(intSerie),
         borderColor: COLORES['Temp alto'],
-        backgroundColor: COLORES['Temp alto'] + '40',
-        borderWidth: 3,
-        pointRadius: 8,
-        showLine: false,
+        borderWidth: 2,
+        pointRadius: 1,
+        tension: 0.25,
+        spanGaps: true,
       });
     }
 
-    graficos.tasa = new Chart(ctxTasa, {
-      type: 'bar',
-      data: {
-        labels: tasaDatasets.map(d => d.label),
-        datasets: [{
-          data: tasaDatasets.map(d => d.data[0].y),
-          backgroundColor: tasaDatasets.map(d => d.borderColor + '80'),
-          borderColor: tasaDatasets.map(d => d.borderColor),
-          borderWidth: 2,
-          borderRadius: 6,
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: ctx => ctx.parsed.y.toFixed(2) + ' °C/h'
-            }
-          }
-        },
-        scales: {
-          x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
-          y: {
-            ticks: { color: '#94a3b8', callback: v => v + ' °C/h' },
-            grid: { color: '#334155' }
-          }
-        }
-      }
-    });
+    if (tasaDatasets.length > 0) {
+      graficos.tasa = crearLinea(ctxTasa, tasaDatasets, { unidad: '°C/h' });
+    }
+  }
+
+  // Presión atmosférica
+  if (data.series['Presion Ext'] && data.series['Presion Ext'].length > 0) {
+    const ctxP = document.getElementById('graf-presion').getContext('2d');
+    graficos.presion = crearLinea(ctxP, makeDatasets(data.series, ['Presion Ext']), { unidad: 'hPa' });
   }
 
   // Comparación 24h
