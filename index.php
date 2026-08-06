@@ -53,12 +53,14 @@ const CONFIGURACION_GRAFICOS = [
   {
     titulo: 'Humedad del aire (%)',
     sensores: ['Hum bajo', 'Hum alto'],
-    color: 'rgba(74,222,128,'
+    color: 'rgba(74,222,128,',
+    minY: 0
   },
   {
     titulo: 'Humedad del suelo (%)',
     sensores: ['Hum suelo'],
-    color: 'rgba(251,191,36,'
+    color: 'rgba(251,191,36,',
+    minY: 0
   },
   {
     titulo: 'Presión atmosférica (hPa)',
@@ -149,6 +151,7 @@ async function cargarDatos() {
             grid: { color: '#334155' }
           },
           y: {
+            min: cfg.minY !== undefined ? cfg.minY : undefined,
             ticks: { color: '#94a3b8' },
             grid: { color: '#334155' }
           }
