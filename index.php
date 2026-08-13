@@ -38,6 +38,13 @@
   .card { background:var(--card); border-radius:10px; padding:14px; border:1px solid var(--border); }
   .card h2 { font-size:14px; margin-bottom:4px; }
   .card .sub { color:var(--muted); font-size:11px; margin-bottom:8px; }
+
+  /* Icono de información (tooltip explicativo) */
+  .card h2 .info-ico { position:relative; display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; margin-left:6px; border-radius:50%; background:#334155; color:#94a3b8; font-size:11px; font-weight:600; cursor:help; vertical-align:middle; }
+  .info-txt { display:none; position:absolute; left:0; top:calc(100% + 6px); width:290px; background:#0f172a; border:1px solid var(--border); border-radius:8px; padding:10px 12px; font-size:12px; line-height:1.5; color:var(--txt); z-index:60; box-shadow:0 10px 24px rgba(0,0,0,.55); font-weight:400; letter-spacing:0; text-transform:none; }
+  .info-ico:hover .info-txt, .info-ico:focus .info-txt { display:block; }
+
+  .aviso { display:none; background:#1e293b; border:1px solid var(--border); border-left:3px solid #38bdf8; color:var(--muted); font-size:12px; border-radius:8px; padding:8px 12px; margin-bottom:16px; }
   .chart { position:relative; height:230px; }
   .vacio { position:absolute; inset:0; z-index:5; color:var(--muted); font-size:13px; display:flex; align-items:center; justify-content:center; pointer-events:none; }
 
@@ -94,6 +101,8 @@
 
 <main>
   <div id="stats-container" class="stats-grid"></div>
+
+  <div class="aviso" id="aviso-diario">Vista de días: cada punto es el <b>promedio del día</b>; la banda coloreada muestra el <b>mínimo y máximo</b> de cada día.</div>
 
   <div class="charts-row">
     <div class="card"><h2>🌡️ Temperaturas</h2><div class="sub" id="sub-temp">Referencias: estrés 10°C · riesgo 5°C · crítico 0°C</div><div class="chart"><canvas id="graf-temp"></canvas></div></div>
@@ -186,6 +195,38 @@ let UMBRALES = JSON.parse(JSON.stringify(UMBRALES_DEF));
 let graficos = {};
 let rangoActual = '24h';
 
+// --- Explicaciones breves para público general (tooltip en cada gráfico) ---
+const EXPLICACIONES = {
+  'graf-temp': 'Temperatura dentro del invernadero. Las líneas marcan cuánto puede enfriarse la planta: a <b>10 °C</b> comienza el estrés por frío, bajo <b>5 °C</b> hay riesgo severo y en <b>0 °C</b> hay riesgo de helada.',
+  'graf-hum': 'Humedad relativa del aire interior. Muy alta favorece hongos; muy baja reseca la planta.',
+  'graf-amort': 'Protección real del invernadero: cuánto más cálido está el interior respecto del exterior. Si baja del mínimo (3 °C), el invernadero protege poco y hay riesgo de frío.',
+  'graf-zonas': 'Horas nocturnas (18:00–08:00) en cada zona de riesgo. Verde = sin riesgo; amarillo/naranja = atención; rojo/negro = peligro de daño.',
+  'graf-vpd': 'Balance temperatura + humedad (cuánto “transpira” la planta). La franja verde (0,4–0,8) es el rango ideal del café. Debajo: ambiente muy húmedo (hongos). Encima: aire seco (estrés hídrico).',
+  'graf-rocio': 'El punto de rocío es la temperatura a la que el vapor condensa sobre las hojas. El margen es la distancia hasta ese punto. Si el margen baja del mínimo (2 °C), las hojas están cerca de mojarse (condensación) → riesgo de hongos.',
+  'graf-grad': 'Diferencia de temperatura entre la parte alta y la baja del invernadero. Valores altos = el aire caliente queda arriba y el frío abajo.',
+  'graf-tasa': 'Velocidad del cambio de temperatura en °C por hora. Positivo = sube; negativo = baja. La línea está suavizada para ver la tendencia real, no el ruido de cada medición.',
+  'graf-presion': 'Presión atmosférica (sensor exterior). Una caída sostenida suele anunciar mal tiempo.',
+  'graf-comparacion': 'Temperatura de hoy (línea sólida) contra la del día anterior a la misma hora (línea punteada).',
+  'graf-rel-temp': 'Cada punto relaciona la temperatura exterior con la interior. El color indica la hora (azul = noche; verde/amarillo = día). La diagonal marca cuando ambas son iguales.',
+  'graf-rel-hum': 'Relaciona la humedad del suelo con la del aire interior. El color indica la hora del día.',
+};
+
+function inicializarInfo() {
+  document.querySelectorAll('.card').forEach(card => {
+    const canvas = card.querySelector('canvas');
+    if (!canvas || !EXPLICACIONES[canvas.id]) return;
+    const h2 = card.querySelector('h2');
+    if (!h2) return;
+    const ico = document.createElement('span');
+    ico.className = 'info-ico';
+    ico.tabIndex = 0;
+    ico.setAttribute('role', 'button');
+    ico.title = '¿Qué significa este gráfico?';
+    ico.innerHTML = '<span class="info-txt">' + EXPLICACIONES[canvas.id] + '</span>i';
+    h2.appendChild(ico);
+  });
+}
+
 document.querySelectorAll('.rango button').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.rango button').forEach(b => b.classList.remove('activo'));
@@ -229,8 +270,8 @@ function datasetsCrudos(keys, series, opts = {}) {
       borderColor: COLORES[k] || '#888',
       backgroundColor: (COLORES[k] || '#888') + '20',
       borderWidth: 2,
-      pointRadius: 1.5,
-      tension: 0.25,
+      pointRadius: opts.puntoColor ? 3 : (opts.pointRadius ?? 1.5),
+      tension: opts.tension || 0.25,
       spanGaps: true,
       yAxisID: y2Keys.includes(k) ? 'y2' : 'y',
     };
@@ -253,18 +294,18 @@ function datasetsDiarios(keys, diario, opts = {}) {
     const baseIdx = out.length;
     out.push({
       label: k + ' (min)', data: dias.map(d => ({ x: d.fecha, y: d.min })),
-      borderColor: 'transparent', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 0, tension: 0.25, spanGaps: true,
+      borderColor: 'transparent', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 0, tension: opts.tension || 0.25, spanGaps: true,
       yAxisID: y2Keys.includes(k) ? 'y2' : 'y'
     });
     out.push({
       label: k + ' (máx)', data: dias.map(d => ({ x: d.fecha, y: d.max })),
-      borderColor: 'transparent', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 0, tension: 0.25, spanGaps: true,
+      borderColor: 'transparent', backgroundColor: 'transparent', pointRadius: 0, borderWidth: 0, tension: opts.tension || 0.25, spanGaps: true,
       fill: { target: { datasetIndex: baseIdx }, above: color + '35' },
       yAxisID: y2Keys.includes(k) ? 'y2' : 'y'
     });
     out.push({
       label: k, data: dias.map(d => ({ x: d.fecha, y: d.avg })),
-      borderColor: color, backgroundColor: color + '20', borderWidth: 2, pointRadius: 2, tension: 0.25, spanGaps: true,
+      borderColor: color, backgroundColor: color + '20', borderWidth: 2, pointRadius: opts.pointRadius ?? 2, tension: opts.tension || 0.25, spanGaps: true,
       yAxisID: y2Keys.includes(k) ? 'y2' : 'y'
     });
   });
@@ -291,7 +332,7 @@ function lineChart(canvas, datasets, opts = {}) {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { labels: { color: '#e2e8f0', font: { size: 11 } } },
+        legend: { labels: { color: '#e2e8f0', font: { size: 11 }, filter: item => !/\((min|máx)\)$/.test(item.text) } },
         tooltip: {
           callbacks: {
             title: items => items.length ? items[0].parsed.x : '',
@@ -430,10 +471,13 @@ async function cargarDatos() {
   const hayDatos = Object.keys(data.series).length > 0;
   if (!hayDatos) {
     document.getElementById('stats-container').innerHTML = '<div style="color:#94a3b8;grid-column:1/-1;text-align:center;padding:20px">Sin datos para este período</div>';
+    document.getElementById('aviso-diario').style.display = 'none';
+    document.querySelectorAll('.chart canvas').forEach(c => vacio(c, 'Sin datos'));
     return;
   }
 
   const esDiario = ['7d', '30d'].includes(rangoActual) && data.diario && Object.keys(data.diario).length > 0;
+  document.getElementById('aviso-diario').style.display = esDiario ? 'block' : 'none';
   const lineas = (keys, series, opts) => esDiario ? datasetsDiarios(keys, data.diario, opts) : datasetsCrudos(keys, series, opts);
 
   // Stats
@@ -488,22 +532,26 @@ async function cargarDatos() {
                     label: { content: 'margen mín', display: true, position: 'start', color: '#e2e8f0', backgroundColor: '#1e293b', font: { size: 9 } } };
   }
   const dsRoc = lineas(['Temp bajo', 'Punto rocio', 'Margen cond.'], data.series, { y2: ['Margen cond.'], minY2: 0 });
+  dsRoc.forEach(ds => {
+    if (ds.label.indexOf('Margen cond.') === 0) ds.label = 'Margen de condensación' + ds.label.slice('Margen cond.'.length);
+    if (ds.label.indexOf('Punto rocio') === 0) ds.label = 'Punto de rocío' + ds.label.slice('Punto rocio'.length);
+  });
   if (dsRoc.length) graficos.rocio = lineChart(document.getElementById('graf-rocio'), dsRoc, { unidad: '°C', y2: true, annotations: anotRocio });
   else vacio(document.getElementById('graf-rocio'));
 
   // 7. Gradiente vertical
   const anotGrad = { cero: lineaAnot(0, '#ffffff60', '0') };
-  const dsG = lineas(['Gradiente vert.'], data.series);
+  const dsG = lineas(['Gradiente vert.'], data.series, { tension: 0.4, pointRadius: 0 });
   if (dsG.length) graficos.grad = lineChart(document.getElementById('graf-grad'), dsG, { unidad: '°C', annotations: anotGrad });
   else vacio(document.getElementById('graf-grad'));
 
   // 8. Tasa de cambio suavizada
   const dsTasa = [];
   if (data.tasa_series && data.tasa_series['Temp Ext'] && data.tasa_series['Temp Ext'].length) {
-    dsTasa.push({ label: 'T ext', data: serieData(data.tasa_series, 'Temp Ext'), borderColor: COLORES['Temp Ext'], borderWidth: 2, pointRadius: 1, tension: 0.25, spanGaps: true });
+    dsTasa.push({ label: 'T ext', data: serieData(data.tasa_series, 'Temp Ext'), borderColor: COLORES['Temp Ext'], borderWidth: 2, pointRadius: 0, tension: 0.4, spanGaps: true });
   }
   if (data.tasa_series && data.tasa_series['T interior'] && data.tasa_series['T interior'].length) {
-    dsTasa.push({ label: 'T interior', data: serieData(data.tasa_series, 'T interior'), borderColor: COLORES['Temp alto'], borderWidth: 2, pointRadius: 1, tension: 0.25, spanGaps: true });
+    dsTasa.push({ label: 'T interior', data: serieData(data.tasa_series, 'T interior'), borderColor: COLORES['Temp alto'], borderWidth: 2, pointRadius: 0, tension: 0.4, spanGaps: true });
   }
   if (dsTasa.length) graficos.tasa = lineChart(document.getElementById('graf-tasa'), dsTasa, { unidad: '°C/h' });
   else vacio(document.getElementById('graf-tasa'));
@@ -624,6 +672,7 @@ document.getElementById('btn-guardar-umbrales').addEventListener('click', async 
   }
 });
 
+inicializarInfo();
 cargarUmbrales();
 cargarDatos();
 </script>

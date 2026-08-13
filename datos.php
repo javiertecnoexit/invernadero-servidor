@@ -113,6 +113,11 @@ foreach ($pivot as $utc => $sens) {
     }
 }
 
+// Suavizado suave del gradiente vertical para una lectura visual más limpia
+if (isset($derivadas['Gradiente vert.'])) {
+    $derivadas['Gradiente vert.'] = mediaMovil($derivadas['Gradiente vert.'], 6);
+}
+
 // Fusionar derivadas en `series` (los gráficos las consumen igual que las crudas)
 foreach ($derivadas as $nombre => $pts) {
     $series[$nombre] = $pts;
@@ -154,12 +159,29 @@ function mediaMovil($serie, $ventana = 4) {
     return $out;
 }
 
+// Ventana adaptativa: apunta a suavizar ~1 hora de datos según la frecuencia real
+function ventanaSuavizado($puntos, $minimo = 4, $maximo = 24) {
+    $dts = [];
+    $n = count($puntos);
+    for ($i = 1; $i < $n; $i++) {
+        $dtMin = (strtotime($puntos[$i][0]) - strtotime($puntos[$i-1][0])) / 60;
+        if ($dtMin > 0) $dts[] = $dtMin;
+    }
+    if (!$dts) return $minimo;
+    sort($dts);
+    $mediana = $dts[intdiv(count($dts), 2)];
+    $ventana = (int)round(60 / max($mediana, 1));
+    return max($minimo, min($maximo, $ventana));
+}
+
 $tasa_series = [];
 if (isset($series['Temp Ext'])) {
-    $tasa_series['Temp Ext'] = mediaMovil(calcTasaSerie($series['Temp Ext']));
+    $w = ventanaSuavizado($series['Temp Ext']);
+    $tasa_series['Temp Ext'] = mediaMovil(calcTasaSerie($series['Temp Ext']), $w);
 }
 if (isset($derivadas['T interior'])) {
-    $tasa_series['T interior'] = mediaMovil(calcTasaSerie($derivadas['T interior']));
+    $w = ventanaSuavizado($derivadas['T interior']);
+    $tasa_series['T interior'] = mediaMovil(calcTasaSerie($derivadas['T interior']), $w);
 }
 
 // Tasa promedio global por sensor (resumen, °C/h) — se mantiene por compatibilidad
