@@ -148,7 +148,9 @@
 </div>
 
 <script>
-Chart.register(Chart.Annotation);
+// chartjs-plugin-annotation se auto-registra al cargar. Solo lo registramos
+// manualmente si alguna build expone el plugin como Chart.Annotation.
+if (window.Chart && Chart.Annotation) { Chart.register(Chart.Annotation); }
 
 const COLORES = {
   'Temp Ext':    '#ef4444',
